@@ -16,7 +16,7 @@ class SyncCheckerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Google Drive 동기화 상태 검사기 (Sync Checker) v2.0")
+        self.title("Google Drive 동기화 상태 검사기 (Sync Checker) v2.1")
         self.geometry("1120x820")
         self.minsize(980, 680)
 
@@ -31,6 +31,7 @@ class SyncCheckerApp(ctk.CTk):
         self._build_ui()
         self._load_auto_detected_pairs()
         self._check_existing_api_token()
+        self._on_mode_change(self.mode_segment.get())
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -63,7 +64,7 @@ class SyncCheckerApp(ctk.CTk):
         )
         btn_refresh_detect.grid(row=0, column=2, padx=(0, 15), pady=8, sticky="e")
 
-        # 1. 모드 선택 및 설정 프레임 (세그먼트 버튼)
+        # 1. 검사 방식 선택 세그먼트
         mode_container = ctk.CTkFrame(self, corner_radius=10)
         mode_container.grid(row=1, column=0, padx=15, pady=(0, 8), sticky="ew")
         mode_container.grid_columnconfigure(1, weight=1)
@@ -72,56 +73,56 @@ class SyncCheckerApp(ctk.CTk):
             row=0, column=0, padx=15, pady=8, sticky="w"
         )
 
-        self.mode_var = ctk.StringVar(value="drive_mode")
         self.mode_segment = ctk.CTkSegmentedButton(
             mode_container,
-            values=["가상 드라이브 모드 (G:\\ 빠른 대조)", "Google Drive 공식 Web API 모드 (실시간 웹 대조)"],
+            values=[
+                "🌐 Google Drive 웹 동기화 검사 (PC G: 드라이브 ↔ 웹 서버 직접 대조)",
+                "📁 2개 폴더 간 대조 (로컬 PC 폴더 ↔ Google Drive 폴더)"
+            ],
             command=self._on_mode_change
         )
-        self.mode_segment.set("가상 드라이브 모드 (G:\\ 빠른 대조)")
-        self.mode_segment.grid(row=0, column=1, padx=15, pady=8, sticky="w")
+        self.mode_segment.set("🌐 Google Drive 웹 동기화 검사 (PC G: 드라이브 ↔ 웹 서버 직접 대조)")
+        self.mode_segment.grid(row=0, column=1, padx=15, pady=8, sticky="ew")
 
-        # 2. 경로 및 대상 입력 프레임
+        # 2. 경로 입력 프레임
         self.input_frame = ctk.CTkFrame(self, corner_radius=10)
         self.input_frame.grid(row=2, column=0, padx=15, pady=(0, 8), sticky="ew")
         self.input_frame.grid_columnconfigure(1, weight=1)
 
-        # 로컬 폴더
-        ctk.CTkLabel(self.input_frame, text="로컬 원본 폴더:", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, padx=15, pady=(10, 5), sticky="w"
+        # [단일 폴더 모드용] PC의 Google Drive 폴더
+        self.lbl_single_path = ctk.CTkLabel(self.input_frame, text="PC의 Google Drive 폴더:", font=ctk.CTkFont(weight="bold"))
+        self.lbl_single_path.grid(row=0, column=0, padx=15, pady=(12, 6), sticky="w")
+
+        self.single_path_entry = ctk.CTkEntry(
+            self.input_frame, 
+            placeholder_text="검사할 PC의 Google Drive 폴더 (예: G:\\다른 컴퓨터\\내 컴퓨터\\LabDrive 또는 G:\\내 드라이브)"
         )
-        self.local_path_entry = ctk.CTkEntry(self.input_frame, placeholder_text="로컬 PC 원본 폴더 (예: C:\\LabDrive)")
-        self.local_path_entry.grid(row=0, column=1, padx=(0, 10), pady=(10, 5), sticky="ew")
-        
-        btn_browse_local = ctk.CTkButton(self.input_frame, text="폴더 선택", width=90, command=self._browse_local)
-        btn_browse_local.grid(row=0, column=2, padx=(0, 15), pady=(10, 5))
+        self.single_path_entry.grid(row=0, column=1, padx=(0, 10), pady=(12, 6), sticky="ew")
 
-        # 대상 구글 드라이브 (가상 드라이브 모드용)
-        self.lbl_gdrive_target = ctk.CTkLabel(self.input_frame, text="Google Drive 폴더:", font=ctk.CTkFont(weight="bold"))
-        self.lbl_gdrive_target.grid(row=1, column=0, padx=15, pady=(5, 10), sticky="w")
-        
-        self.gdrive_path_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Google Drive 대상 폴더 (예: G:\\다른 컴퓨터\\내 컴퓨터\\LabDrive)")
-        self.gdrive_path_entry.grid(row=1, column=1, padx=(0, 10), pady=(5, 10), sticky="ew")
+        self.btn_browse_single = ctk.CTkButton(self.input_frame, text="폴더 선택", width=90, command=self._browse_single)
+        self.btn_browse_single.grid(row=0, column=2, padx=(0, 15), pady=(12, 6))
 
+        # [2개 폴더 모드용 - 평소엔 숨김] 로컬 원본 & Google Drive 대상
+        self.lbl_local_path = ctk.CTkLabel(self.input_frame, text="로컬 원본 폴더:", font=ctk.CTkFont(weight="bold"))
+        self.local_path_entry = ctk.CTkEntry(self.input_frame, placeholder_text="로컬 PC 원본 폴더 (예: C:\\MyWork)")
+        self.btn_browse_local = ctk.CTkButton(self.input_frame, text="폴더 선택", width=90, command=self._browse_local)
+
+        self.lbl_gdrive_target = ctk.CTkLabel(self.input_frame, text="Google Drive 대상 폴더:", font=ctk.CTkFont(weight="bold"))
+        self.gdrive_path_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Google Drive 대상 폴더 (예: G:\\내 드라이브\\MyWork)")
         self.btn_browse_gdrive = ctk.CTkButton(self.input_frame, text="드라이브 선택", width=90, command=self._browse_gdrive)
-        self.btn_browse_gdrive.grid(row=1, column=2, padx=(0, 15), pady=(5, 10))
 
-        # API 모드용 위젯들 (처음엔 숨김)
-        self.api_config_frame = ctk.CTkFrame(self.input_frame, fg_color="transparent")
-        self.api_config_frame.grid(row=2, column=0, columnspan=3, padx=15, pady=(0, 10), sticky="ew")
-        self.api_config_frame.grid_columnconfigure(1, weight=1)
-        self.api_config_frame.grid_remove() # 기본 가상드라이브 모드이므로 숨김
+        # API 인증 상태 바
+        self.api_status_frame = ctk.CTkFrame(self.input_frame, fg_color="transparent")
+        self.api_status_frame.grid(row=1, column=0, columnspan=3, padx=15, pady=(4, 10), sticky="ew")
+        self.api_status_frame.grid_columnconfigure(0, weight=1)
 
-        self.lbl_api_auth = ctk.CTkLabel(self.api_config_frame, text="API 인증 상태: 미연동 (로그인 필요)", text_color="#D84315")
-        self.lbl_api_auth.grid(row=0, column=0, padx=(0, 10), pady=4, sticky="w")
+        self.lbl_api_auth = ctk.CTkLabel(self.api_status_frame, text="API 인증 상태: 확인 중...", text_color="gray")
+        self.lbl_api_auth.grid(row=0, column=0, sticky="w")
 
-        self.btn_api_auth = ctk.CTkButton(self.api_config_frame, text="🔑 Google 계정 로그인 / 인증", width=190, command=self._authenticate_api)
-        self.btn_api_auth.grid(row=0, column=1, padx=5, pady=4, sticky="w")
+        self.btn_api_auth = ctk.CTkButton(self.api_status_frame, text="🔑 Google 계정 로그인 / 재인증", width=190, command=self._authenticate_api)
+        self.btn_api_auth.grid(row=0, column=1, padx=5, sticky="e")
 
-        self.btn_search_web_folder = ctk.CTkButton(self.api_config_frame, text="🔍 웹 폴더 찾기", width=110, command=self._search_web_folder)
-        self.btn_search_web_folder.grid(row=0, column=2, padx=5, pady=4, sticky="w")
-
-        # 3. 검사 옵션 & 컨트롤 버튼
+        # 3. 옵션 & 컨트롤 버튼
         control_frame = ctk.CTkFrame(self, corner_radius=10)
         control_frame.grid(row=3, column=0, padx=15, pady=(0, 8), sticky="ew")
         control_frame.grid_columnconfigure(2, weight=1)
@@ -129,7 +130,7 @@ class SyncCheckerApp(ctk.CTk):
         self.hash_check_var = ctk.BooleanVar(value=True)
         self.hash_checkbox = ctk.CTkCheckBox(
             control_frame, 
-            text="정밀 검사 (MD5 해시 대조)", 
+            text="정밀 검사 (MD5 해시 대조 - 클라우드 내용과 100% 일치 확인)", 
             variable=self.hash_check_var
         )
         self.hash_checkbox.grid(row=0, column=0, padx=15, pady=10, sticky="w")
@@ -172,25 +173,24 @@ class SyncCheckerApp(ctk.CTk):
         result_frame.grid_columnconfigure(0, weight=1)
         result_frame.grid_rowconfigure(3, weight=1)
 
-        # 프로그레스 바 & 상태 텍스트
         self.progress_bar = ctk.CTkProgressBar(result_frame)
         self.progress_bar.grid(row=0, column=0, padx=15, pady=(10, 4), sticky="ew")
         self.progress_bar.set(0)
 
-        self.lbl_status = ctk.CTkLabel(result_frame, text="검사할 대상을 선택한 후 [동기화 검사 시작]을 눌러주세요.", text_color="gray")
+        self.lbl_status = ctk.CTkLabel(result_frame, text="검사할 폴더를 지정한 후 [동기화 검사 시작]을 눌러주세요.", text_color="gray")
         self.lbl_status.grid(row=1, column=0, padx=15, pady=(0, 6), sticky="w")
 
-        # 요약 통계 배지
+        # 통계 배지
         summary_container = ctk.CTkFrame(result_frame, fg_color="transparent")
         summary_container.grid(row=2, column=0, padx=15, pady=(0, 8), sticky="ew")
 
         self.badge_total = self._create_badge(summary_container, "전체: 0", "#4A5568")
         self.badge_synced = self._create_badge(summary_container, "정상 동기화: 0", "#2E7D32")
-        self.badge_missing = self._create_badge(summary_container, "드라이브 누락: 0", "#C62828")
+        self.badge_missing = self._create_badge(summary_container, "웹 업로드 누락: 0", "#C62828")
         self.badge_mismatch = self._create_badge(summary_container, "불일치: 0", "#EF6C00")
-        self.badge_extra = self._create_badge(summary_container, "드라이브 전용: 0", "#1565C0")
+        self.badge_extra = self._create_badge(summary_container, "웹 전용: 0", "#1565C0")
 
-        # 툴바: 필터, 검색, 원클릭 복사, CSV 내보내기
+        # 툴바: 필터, 검색, CSV 내보내기
         toolbar = ctk.CTkFrame(result_frame, fg_color="transparent")
         toolbar.grid(row=3, column=0, padx=15, pady=(0, 8), sticky="ew")
         toolbar.grid_columnconfigure(2, weight=1)
@@ -198,7 +198,7 @@ class SyncCheckerApp(ctk.CTk):
         ctk.CTkLabel(toolbar, text="보기 필터:").grid(row=0, column=0, padx=(0, 6), sticky="w")
         self.filter_combobox = ctk.CTkComboBox(
             toolbar, 
-            values=["⚠️ 문제 항목만 (누락 + 불일치)", "모든 파일 보기", "🔴 구글드라이브 누락만", "🟡 불일치 파일만", "🟢 동기화 완료만"],
+            values=["⚠️ 문제 항목만 (누락 + 불일치)", "모든 파일 보기", "🔴 웹 업로드 누락만", "🟡 불일치 파일만", "🟢 동기화 완료만"],
             width=230,
             command=self._apply_filter
         )
@@ -212,19 +212,10 @@ class SyncCheckerApp(ctk.CTk):
         btn_action_container = ctk.CTkFrame(toolbar, fg_color="transparent")
         btn_action_container.grid(row=0, column=3, sticky="e")
 
-        self.btn_sync_now = ctk.CTkButton(
-            btn_action_container,
-            text="🚀 누락/불일치 파일 Drive로 복사",
-            fg_color="#2E7D32",
-            hover_color="#1B5E20",
-            command=self._sync_selected_files
-        )
-        self.btn_sync_now.pack(side="left", padx=4)
-
         btn_export = ctk.CTkButton(
             btn_action_container,
-            text="📥 CSV 내보내기",
-            width=90,
+            text="📥 CSV 리포트 내보내기",
+            width=140,
             command=self._export_csv
         )
         btn_export.pack(side="left")
@@ -240,16 +231,16 @@ class SyncCheckerApp(ctk.CTk):
 
         self.tree.heading("status", text="동기화 상태")
         self.tree.heading("rel_path", text="상대 파일 경로")
-        self.tree.heading("local_size", text="로컬 크기")
-        self.tree.heading("gdrive_size", text="드라이브 크기")
-        self.tree.heading("local_mtime", text="로컬 수정시각")
-        self.tree.heading("gdrive_mtime", text="드라이브 수정시각")
+        self.tree.heading("local_size", text="PC 크기")
+        self.tree.heading("gdrive_size", text="웹 클라우드 크기")
+        self.tree.heading("local_mtime", text="PC 수정시각")
+        self.tree.heading("gdrive_mtime", text="웹 클라우드 수정시각")
         self.tree.heading("detail", text="상세 정보")
 
-        self.tree.column("status", width=120, anchor="center")
+        self.tree.column("status", width=125, anchor="center")
         self.tree.column("rel_path", width=340, anchor="w")
         self.tree.column("local_size", width=85, anchor="e")
-        self.tree.column("gdrive_size", width=85, anchor="e")
+        self.tree.column("gdrive_size", width=95, anchor="e")
         self.tree.column("local_mtime", width=135, anchor="center")
         self.tree.column("gdrive_mtime", width=135, anchor="center")
         self.tree.column("detail", width=220, anchor="w")
@@ -281,7 +272,6 @@ class SyncCheckerApp(ctk.CTk):
         if self.detected_pairs:
             display_list = [p[0] for p in self.detected_pairs]
             self.detected_combobox.configure(values=display_list)
-            # 첫 번째 항목(예: LabDrive)을 기본 선택
             self.detected_combobox.set(display_list[0])
             self._on_detected_pair_selected(display_list[0])
         else:
@@ -291,6 +281,11 @@ class SyncCheckerApp(ctk.CTk):
     def _on_detected_pair_selected(self, choice):
         for name, local, gdrive in self.detected_pairs:
             if name == choice:
+                # 단일 폴더 모드일 때는 gdrive 경로 설정
+                if gdrive:
+                    self.single_path_entry.delete(0, "end")
+                    self.single_path_entry.insert(0, gdrive)
+                # 2개 폴더 모드용 필드도 업데이트
                 if local:
                     self.local_path_entry.delete(0, "end")
                     self.local_path_entry.insert(0, local)
@@ -300,16 +295,49 @@ class SyncCheckerApp(ctk.CTk):
                 break
 
     def _on_mode_change(self, value):
-        if "API" in value:
-            self.lbl_gdrive_target.configure(text="Google Drive 웹 폴더:")
-            self.btn_browse_gdrive.configure(state="disabled")
-            self.api_config_frame.grid()
-            self.btn_sync_now.configure(state="disabled") # API 모드에서는 직접 업로드 대신 안내
+        is_web_sync_mode = "웹 동기화 검사" in value
+
+        if is_web_sync_mode:
+            # 1번 모드: 단일 폴더 모드 (PC G: 드라이브 ↔ 웹 서버 직접 대조)
+            self.lbl_local_path.grid_remove()
+            self.local_path_entry.grid_remove()
+            self.btn_browse_local.grid_remove()
+            self.lbl_gdrive_target.grid_remove()
+            self.gdrive_path_entry.grid_remove()
+            self.btn_browse_gdrive.grid_remove()
+
+            self.lbl_single_path.grid(row=0, column=0, padx=15, pady=(12, 6), sticky="w")
+            self.single_path_entry.grid(row=0, column=1, padx=(0, 10), pady=(12, 6), sticky="ew")
+            self.btn_browse_single.grid(row=0, column=2, padx=(0, 15), pady=(12, 6))
+            self.api_status_frame.grid(row=1, column=0, columnspan=3, padx=15, pady=(4, 10), sticky="ew")
+
+            self.badge_missing.configure(text="웹 업로드 누락: 0")
+            self.badge_extra.configure(text="웹 전용: 0")
+            self.tree.heading("local_size", text="PC 크기")
+            self.tree.heading("gdrive_size", text="웹 클라우드 크기")
+            self.tree.heading("local_mtime", text="PC 수정시각")
+            self.tree.heading("gdrive_mtime", text="웹 클라우드 수정시각")
         else:
-            self.lbl_gdrive_target.configure(text="Google Drive 폴더:")
-            self.btn_browse_gdrive.configure(state="normal")
-            self.api_config_frame.grid_remove()
-            self.btn_sync_now.configure(state="normal")
+            # 2번 모드: 로컬 C:\ ↔ Google Drive 폴더 비교
+            self.lbl_single_path.grid_remove()
+            self.single_path_entry.grid_remove()
+            self.btn_browse_single.grid_remove()
+            self.api_status_frame.grid_remove()
+
+            self.lbl_local_path.grid(row=0, column=0, padx=15, pady=(10, 5), sticky="w")
+            self.local_path_entry.grid(row=0, column=1, padx=(0, 10), pady=(10, 5), sticky="ew")
+            self.btn_browse_local.grid(row=0, column=2, padx=(0, 15), pady=(10, 5))
+
+            self.lbl_gdrive_target.grid(row=1, column=0, padx=15, pady=(5, 10), sticky="w")
+            self.gdrive_path_entry.grid(row=1, column=1, padx=(0, 10), pady=(5, 10), sticky="ew")
+            self.btn_browse_gdrive.grid(row=1, column=2, padx=(0, 15), pady=(5, 10))
+
+            self.badge_missing.configure(text="드라이브 누락: 0")
+            self.badge_extra.configure(text="드라이브 전용: 0")
+            self.tree.heading("local_size", text="로컬 크기")
+            self.tree.heading("gdrive_size", text="드라이브 크기")
+            self.tree.heading("local_mtime", text="로컬 수정시각")
+            self.tree.heading("gdrive_mtime", text="드라이브 수정시각")
 
     def _check_existing_api_token(self):
         if os.path.exists("token.json"):
@@ -318,11 +346,13 @@ class SyncCheckerApp(ctk.CTk):
                 email = user.get("emailAddress", "")
                 name = user.get("displayName", "")
                 self.lbl_api_auth.configure(
-                    text=f"API 인증됨: 👤 {name} ({email})" if email else f"API 인증됨: 👤 {name}",
+                    text=f"API 인증 완료: {name} ({email})" if email else f"API 인증 완료: {name}",
                     text_color="#2E7D32"
                 )
             except Exception:
-                pass
+                self.lbl_api_auth.configure(text="API 인증 만료 (재인증 필요)", text_color="#D84315")
+        else:
+            self.lbl_api_auth.configure(text="API 미인증 (Google 로그인 필요)", text_color="#D84315")
 
     def _authenticate_api(self):
         cred_file = "credentials.json"
@@ -340,7 +370,7 @@ class SyncCheckerApp(ctk.CTk):
                 email = user.get("emailAddress", "")
                 name = user.get("displayName", "")
                 self.after(0, lambda: self.lbl_api_auth.configure(
-                    text=f"API 인증 완료: 👤 {name} ({email})",
+                    text=f"API 인증 완료: {name} ({email})",
                     text_color="#2E7D32"
                 ))
                 self.after(0, lambda: messagebox.showinfo("인증 성공", f"Google Drive API 인증에 성공했습니다!\n사용자: {name} ({email})"))
@@ -349,48 +379,12 @@ class SyncCheckerApp(ctk.CTk):
 
         threading.Thread(target=run_auth, daemon=True).start()
 
-    def _search_web_folder(self):
-        if not self.api_client.is_authenticated():
-            messagebox.showinfo("알림", "먼저 [Google 계정 로그인 / 인증]을 진행해주세요.")
-            return
-
-        query_name = os.path.basename(self.local_path_entry.get().strip())
-        folders = self.api_client.search_folders(query_name)
-        if not folders:
-            folders = self.api_client.search_folders("")
-
-        if not folders:
-            messagebox.showinfo("검색 결과", "Google Drive 웹 상에서 폴더를 찾을 수 없습니다.")
-            return
-
-        # 간단한 선택 창
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Google Drive 웹 대상 폴더 선택")
-        dialog.geometry("500x350")
-        dialog.transient(self)
-        dialog.grab_set()
-
-        ctk.CTkLabel(dialog, text="Google Drive 웹 상의 폴더를 선택하세요:", font=ctk.CTkFont(weight="bold")).pack(pady=10)
-
-        folder_list = ctk.CTkScrollableFrame(dialog, width=450, height=220)
-        folder_list.pack(pady=5, padx=10, fill="both", expand=True)
-
-        selected_id = ctk.StringVar()
-
-        for f in folders:
-            text = f"{f['name']} (ID: {f['id']})"
-            rb = ctk.CTkRadioButton(folder_list, text=text, variable=selected_id, value=f"{f['name']}::{f['id']}")
-            rb.pack(anchor="w", pady=4, padx=5)
-
-        def confirm():
-            val = selected_id.get()
-            if val:
-                name, f_id = val.split("::")
-                self.gdrive_path_entry.delete(0, "end")
-                self.gdrive_path_entry.insert(0, f"gdrive://{name} (id:{f_id})")
-                dialog.destroy()
-
-        ctk.CTkButton(dialog, text="선택 완료", command=confirm).pack(pady=10)
+    def _browse_single(self):
+        initial = r"G:\다른 컴퓨터\내 컴퓨터" if os.path.exists(r"G:\다른 컴퓨터\내 컴퓨터") else "G:\\"
+        folder = filedialog.askdirectory(title="검사할 PC의 Google Drive 폴더 선택", initialdir=initial)
+        if folder:
+            self.single_path_entry.delete(0, "end")
+            self.single_path_entry.insert(0, os.path.normpath(folder))
 
     def _browse_local(self):
         folder = filedialog.askdirectory(title="로컬 원본 폴더 선택")
@@ -406,24 +400,27 @@ class SyncCheckerApp(ctk.CTk):
             self.gdrive_path_entry.insert(0, os.path.normpath(folder))
 
     def _start_scan(self):
-        local_dir = self.local_path_entry.get().strip()
-        gdrive_target = self.gdrive_path_entry.get().strip()
         mode = self.mode_segment.get()
+        is_web_sync_mode = "웹 동기화 검사" in mode
 
-        if not local_dir or not os.path.isdir(local_dir):
-            messagebox.showerror("오류", "유효한 로컬 폴더를 지정해주세요.")
-            return
+        if is_web_sync_mode:
+            target_path = self.single_path_entry.get().strip()
+            if not target_path or not os.path.isdir(target_path):
+                messagebox.showerror("오류", "유효한 PC의 Google Drive 폴더를 지정해주세요.")
+                return
 
-        is_api_mode = "API" in mode
-
-        if is_api_mode:
             if not self.api_client.is_authenticated():
-                messagebox.showerror("오류", "Google Drive API 모드를 사용하려면 먼저 Google 로그인을 진행해주세요.")
-                return
-            if not gdrive_target:
-                messagebox.showerror("오류", "Google Drive 웹 대상 폴더를 선택해주세요.")
-                return
+                try:
+                    self.api_client.authenticate()
+                except Exception as e:
+                    messagebox.showerror("인증 필요", f"Google Drive API 인증이 필요합니다:\n{str(e)}")
+                    return
         else:
+            local_dir = self.local_path_entry.get().strip()
+            gdrive_target = self.gdrive_path_entry.get().strip()
+            if not local_dir or not os.path.isdir(local_dir):
+                messagebox.showerror("오류", "유효한 로컬 폴더를 지정해주세요.")
+                return
             if not gdrive_target or not os.path.isdir(gdrive_target):
                 messagebox.showerror("오류", "유효한 Google Drive 폴더를 지정해주세요.")
                 return
@@ -447,13 +444,13 @@ class SyncCheckerApp(ctk.CTk):
 
         def run():
             try:
-                if is_api_mode:
-                    default_folder_name = os.path.basename(os.path.normpath(local_dir))
-                    self.lbl_status.configure(text="Google Drive 웹에서 대상 폴더를 검색하는 중...")
-                    folder_id = self.api_client.resolve_folder_id(gdrive_target, default_name=default_folder_name)
+                if is_web_sync_mode:
+                    folder_name = os.path.basename(os.path.normpath(target_path))
+                    self.lbl_status.configure(text=f"Google Drive 웹에서 '{folder_name}' 폴더를 찾는 중...")
+                    folder_id = self.api_client.resolve_folder_id(target_path, default_name=folder_name)
                     
                     results = self.api_client.compare_with_local(
-                        local_dir=local_dir,
+                        local_dir=target_path,
                         root_folder_id=folder_id,
                         check_hash=self.hash_check_var.get(),
                         exclude_system=self.exclude_system_var.get(),
@@ -493,6 +490,9 @@ class SyncCheckerApp(ctk.CTk):
         self.progress_bar.set(1.0)
         self.lbl_status.configure(text=f"검사 완료! (총 {len(results)}개 파일 대조 완료)", text_color="#2E7D32")
 
+        mode = self.mode_segment.get()
+        is_web_sync_mode = "웹 동기화 검사" in mode
+
         total_count = len(results)
         synced_count = sum(1 for r in results if r.status == SyncStatus.SYNCED)
         missing_count = sum(1 for r in results if r.status == SyncStatus.MISSING_IN_GDRIVE)
@@ -501,9 +501,15 @@ class SyncCheckerApp(ctk.CTk):
 
         self.badge_total.configure(text=f"전체: {total_count}")
         self.badge_synced.configure(text=f"정상 동기화: {synced_count}")
-        self.badge_missing.configure(text=f"드라이브 누락: {missing_count}")
+        
+        if is_web_sync_mode:
+            self.badge_missing.configure(text=f"웹 업로드 누락: {missing_count}")
+            self.badge_extra.configure(text=f"웹 전용: {extra_count}")
+        else:
+            self.badge_missing.configure(text=f"드라이브 누락: {missing_count}")
+            self.badge_extra.configure(text=f"드라이브 전용: {extra_count}")
+
         self.badge_mismatch.configure(text=f"불일치: {mismatch_count}")
-        self.badge_extra.configure(text=f"드라이브 전용: {extra_count}")
 
         self._apply_filter()
 
@@ -521,7 +527,7 @@ class SyncCheckerApp(ctk.CTk):
 
             if "문제 항목만" in filter_mode and not r.is_problematic:
                 continue
-            elif "구글드라이브 누락만" in filter_mode and r.status != SyncStatus.MISSING_IN_GDRIVE:
+            elif ("누락만" in filter_mode) and r.status != SyncStatus.MISSING_IN_GDRIVE:
                 continue
             elif "불일치 파일만" in filter_mode and r.status not in (SyncStatus.SIZE_MISMATCH, SyncStatus.TIME_MISMATCH, SyncStatus.HASH_MISMATCH):
                 continue
@@ -549,34 +555,6 @@ class SyncCheckerApp(ctk.CTk):
                 r.detail
             ), tags=(tag,))
 
-    def _sync_selected_files(self):
-        problem_items = [r for r in self.all_results if r.is_problematic and r.local_size >= 0]
-        if not problem_items:
-            messagebox.showinfo("알림", "Google Drive로 복사할 미동기화/불일치 파일이 없습니다.")
-            return
-
-        msg = (
-            f"발견된 {len(problem_items)}개의 미동기화/불일치 파일을 Google Drive 대상 폴더로 지금 복사하시겠습니까?\n\n"
-            f"대상 경로: {self.gdrive_path_entry.get()}\n"
-            f"※ 복사 시 Google Drive 데스크톱 앱이 변경을 감지하고 클라우드로 자동 업로드하게 됩니다."
-        )
-        if not messagebox.askyesno("동기화 복사 확인", msg):
-            return
-
-        self.btn_sync_now.configure(state="disabled")
-        self.btn_start.configure(state="disabled")
-
-        def run_copy():
-            def progress(curr, tot, text):
-                self.after(0, lambda: self.lbl_status.configure(text=text))
-                self.after(0, lambda: self.progress_bar.set(curr / tot))
-
-            copied = self.comparator.sync_to_gdrive(problem_items, progress_callback=progress)
-            self.after(0, lambda: messagebox.showinfo("동기화 완료", f"총 {copied}개 파일이 Google Drive로 복사되었습니다.\n검사를 다시 실행합니다."))
-            self.after(0, self._start_scan)
-
-        threading.Thread(target=run_copy, daemon=True).start()
-
     def _export_csv(self):
         if not self.all_results:
             messagebox.showinfo("알림", "내보낼 검사 결과가 없습니다.")
@@ -593,7 +571,7 @@ class SyncCheckerApp(ctk.CTk):
         try:
             with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
-                writer.writerow(["상태", "상대경로", "로컬크기(Byte)", "드라이브크기(Byte)", "로컬수정일시", "드라이브수정일시", "상세정보"])
+                writer.writerow(["상태", "상대경로", "PC크기(Byte)", "웹크기(Byte)", "PC수정일시", "웹수정일시", "상세정보"])
                 for r in self.all_results:
                     writer.writerow([
                         r.status.value,
