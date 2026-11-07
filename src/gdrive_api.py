@@ -12,7 +12,6 @@ from googleapiclient.discovery import build
 from src.comparator import FileItem, SyncStatus
 from src.utils import calculate_file_hash, should_exclude
 
-# 읽기/비교 및 업로드용 스코프
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 class GoogleDriveApiClient:
@@ -57,13 +56,11 @@ class GoogleDriveApiClient:
                 flow = InstalledAppFlow.from_client_secrets_file(self.credentials_path, SCOPES)
                 creds = flow.run_local_server(port=0)
 
-            # 토큰 저장
             with open(self.token_path, 'w', encoding='utf-8') as token_file:
                 token_file.write(creds.to_json())
 
         self.service = build('drive', 'v3', credentials=creds)
 
-        # 사용자 정보 조회
         try:
             about = self.service.about().get(fields="user(displayName, emailAddress)").execute()
             self.user_info = about.get('user', {})
@@ -77,9 +74,11 @@ class GoogleDriveApiClient:
         if not self.service:
             raise RuntimeError("Google Drive에 인증되지 않았습니다.")
 
+        # 특수문자 이스케이프
+        safe_name = name_query.replace("'", "\\'")
         query = "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        if name_query:
-            query += f" and name contains '{name_query}'"
+        if safe_name:
+            query += f" and name contains '{safe_name}'"
 
         results = self.service.files().list(
             q=query,
@@ -89,14 +88,52 @@ class GoogleDriveApiClient:
 
         return results.get('files', [])
 
+    def resolve_folder_id(self, target_input: str, default_name: str = "") -> str:
+        """
+        사용자가 입력한 경로(예: G:\다른 컴퓨터\내 컴퓨터\LabDrive)나 폴더명에서 
+        Google Drive 웹의 실제 Folder ID를 자동 해석
+        """
+        if not self.service:
+            raise RuntimeError("Google Drive에 로그인되어 있지 않습니다.")
+
+        target = target_input.strip()
+
+        # 1. 이미 id:xxx 형태인 경우
+        if "id:" in target:
+            return target.split("id:")[1].rstrip(")").strip()
+
+        # 2. 순수 Google Drive ID인 경우 (보통 25~45자 영숫자/하이픈/언더스코어)
+        if len(target) >= 20 and not ("\\" in target or "/" in target or " " in target or ":" in target):
+            return target
+
+        # 3. 윈도우 경로이거나 이름인 경우 (예: G:\다른 컴퓨터\내 컴퓨터\LabDrive)
+        folder_name = os.path.basename(os.path.normpath(target)) if ("\\" in target or "/" in target) else target
+        if not folder_name or folder_name in ["내 컴퓨터", "다른 컴퓨터", "내 드라이브"]:
+            folder_name = default_name
+
+        if not folder_name:
+            raise ValueError("검색할 폴더 이름을 확인할 수 없습니다.")
+
+        # 웹에서 검색
+        folders = self.search_folders(folder_name)
+        if not folders:
+            raise ValueError(f"Google Drive 웹에서 '{folder_name}' 폴더를 찾을 수 없습니다.")
+
+        # 정확히 이름이 일치하는 폴더 우선
+        exact_matches = [f for f in folders if f['name'].lower() == folder_name.lower()]
+        if exact_matches:
+            # 가장 최근 수정된 폴더 선택
+            exact_matches.sort(key=lambda x: x.get('modifiedTime', ''), reverse=True)
+            return exact_matches[0]['id']
+
+        return folders[0]['id']
+
     def fetch_all_files_in_folder(self, root_folder_id: str, progress_callback: Optional[Callable[[str], None]] = None) -> Dict[str, dict]:
         """
         특정 Google Drive 폴더 하위의 모든 파일들을 재귀적으로 수집하여 상대경로 -> 메타데이터 맵 생성
         """
         self._is_cancelled = False
         file_map: Dict[str, dict] = {}
-
-        # 큐: (folder_id, current_rel_dir)
         queue = [(root_folder_id, "")]
 
         while queue:
@@ -127,12 +164,10 @@ class GoogleDriveApiClient:
                     if mime_type == 'application/vnd.google-apps.folder':
                         queue.append((item['id'], rel_path))
                     else:
-                        # Google Docs/Sheets 전용 형식은 바이너리 크기나 MD5가 없음
                         is_gdoc = mime_type.startswith('application/vnd.google-apps.')
                         size = int(item.get('size', 0)) if not is_gdoc else 0
                         md5 = item.get('md5Checksum', '')
                         
-                        # ISO 8601 -> timestamp
                         mtime_str = item.get('modifiedTime', '')
                         mtime_ts = 0.0
                         if mtime_str:
@@ -169,7 +204,6 @@ class GoogleDriveApiClient:
         if not os.path.isdir(local_dir):
             raise ValueError(f"유효하지 않은 로컬 폴더입니다: {local_dir}")
 
-        # 1. Google Drive 웹 파일 수집
         if progress_callback:
             progress_callback(0, 0, "Google Drive 웹 파일 목록을 API로 불러오는 중...")
         
@@ -180,7 +214,6 @@ class GoogleDriveApiClient:
         if self._is_cancelled:
             return []
 
-        # 2. 로컬 파일 목록 수집
         if progress_callback:
             progress_callback(0, 0, "로컬 파일 목록 스캔 중...")
 
@@ -201,7 +234,6 @@ class GoogleDriveApiClient:
                 except Exception:
                     pass
 
-        # 3. 파일 대조
         all_paths = sorted(list(set(local_files.keys()).union(set(web_files.keys()))))
         total_files = len(all_paths)
 
@@ -216,16 +248,14 @@ class GoogleDriveApiClient:
                 progress_callback(index + 1, total_files, f"웹 서버와 대조 중 ({index+1}/{total_files}): {rel_path}")
 
             if l_stat and not w_file:
-                # 로컬에만 있음 -> 웹 업로드 누락!
                 results.append(FileItem(
                     rel_path=rel_path,
                     status=SyncStatus.MISSING_IN_GDRIVE,
                     local_size=l_stat.st_size,
                     local_mtime=l_stat.st_mtime,
-                    detail="로컬에만 존재함 (Google Drive 웹에 업로드되지 않음)"
+                    detail="로컬에만 존재함 (Google Drive 웹에 아직 업로드되지 않음)"
                 ))
             elif not l_stat and w_file:
-                # 웹에만 있음
                 results.append(FileItem(
                     rel_path=rel_path,
                     status=SyncStatus.EXTRA_IN_GDRIVE,
@@ -241,7 +271,6 @@ class GoogleDriveApiClient:
                 w_md5 = w_file.get('md5', '')
                 is_gdoc = w_file.get('is_gdoc', False)
 
-                # 구글 문서(Docs/Sheets 등)는 크기/MD5 비교 제외
                 if is_gdoc:
                     results.append(FileItem(
                         rel_path=rel_path,
@@ -251,7 +280,6 @@ class GoogleDriveApiClient:
                     ))
                     continue
 
-                # 크기 비교
                 if l_size != w_size:
                     results.append(FileItem(
                         rel_path=rel_path,
@@ -264,7 +292,6 @@ class GoogleDriveApiClient:
                     ))
                     continue
 
-                # 해시 검사 (Google Drive API는 원본 파일의 MD5 해시를 기본 제공함)
                 if check_hash and w_md5:
                     l_full = os.path.join(local_dir, rel_path.replace("/", "\\"))
                     l_hash = calculate_file_hash(l_full)
@@ -290,7 +317,7 @@ class GoogleDriveApiClient:
                     gdrive_size=w_size,
                     gdrive_mtime=w_mtime,
                     gdrive_hash=w_md5,
-                    detail="Google Drive 웹과 일치함"
+                    detail="Google Drive 웹과 완벽 일치"
                 ))
 
         return results

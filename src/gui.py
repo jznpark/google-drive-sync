@@ -448,9 +448,10 @@ class SyncCheckerApp(ctk.CTk):
         def run():
             try:
                 if is_api_mode:
-                    folder_id = gdrive_target
-                    if "id:" in folder_id:
-                        folder_id = folder_id.split("id:")[1].rstrip(")")
+                    default_folder_name = os.path.basename(os.path.normpath(local_dir))
+                    self.lbl_status.configure(text="Google Drive 웹에서 대상 폴더를 검색하는 중...")
+                    folder_id = self.api_client.resolve_folder_id(gdrive_target, default_name=default_folder_name)
+                    
                     results = self.api_client.compare_with_local(
                         local_dir=local_dir,
                         root_folder_id=folder_id,
