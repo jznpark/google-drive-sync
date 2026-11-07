@@ -16,7 +16,11 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo [실행] Google Drive 동기화 상태 검사기를 실행합니다...
-start "" ".venv\Scripts\pythonw.exe" main.py
-if errorlevel 1 (
+".venv\Scripts\pythonw.exe" main.py
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [오류 발생] 프로그램 실행 중 오류가 발생했습니다:
     ".venv\Scripts\python.exe" main.py
+    echo.
+    pause
 )

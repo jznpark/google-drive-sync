@@ -32,7 +32,7 @@ class SyncCheckerApp(ctk.CTk):
         candidates = [
             r"G:\내 드라이브",
             r"G:\My Drive",
-            r"G:\"
+            "G:\\"
         ]
         for path in candidates:
             if os.path.exists(path):
